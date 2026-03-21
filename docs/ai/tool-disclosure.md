@@ -63,8 +63,6 @@ Im Rahmen des Traffic-Prediction-Projekts wurden folgende Datensätze verwendet:
 | **Wetterdaten (integriert im Datensatz)** | National Weather Service (via UCI) | Temperatur, Regen, Schnee, Bewölkung | Externe Einflussfaktoren als Features |
 | **Zeitstempelbasierte Kalenderdaten** | Abgeleitet aus Timestamp | Stunde, Wochentag, Monat, Feiertage | Feature Engineering für Saisonalitätsmodellierung |
 
-*(Falls ein anderer Datensatz verwendet wurde, bitte hier entsprechend anpassen.)*
-
 ---
 
 # Methodische Absicherung

@@ -1,0 +1,19 @@
+{
+  "city": "Berlin",
+  "events": [
+    {
+      "name": "Marathon Berlin",
+      "start": "2026-09-27 07:00",
+      "end": "2026-09-27 18:00",
+      "impact_level": 3.5,
+      "category": "festival"
+    },
+    {
+      "name": "Konzert Olympiastadion",
+      "start": "2026-07-18 17:00",
+      "end": "2026-07-18 23:30",
+      "impact_level": 2.8,
+      "category": "concert"
+    }
+  ]
+}

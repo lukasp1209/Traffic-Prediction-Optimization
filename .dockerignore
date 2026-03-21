@@ -1,0 +1,12 @@
+.git
+.idea
+__pycache__
+*.pyc
+*.pyo
+*.pyd
+node_modules
+src/node_modules
+dist
+build
+.venv
+reports

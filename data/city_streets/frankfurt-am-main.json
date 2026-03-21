@@ -1,0 +1,13 @@
+{
+  "city": "Frankfurt am Main",
+  "city_multiplier": 1.18,
+  "streets": [
+    { "name": "Mainzer Landstrasse", "weight": 0.16 },
+    { "name": "Hanauer Landstrasse", "weight": 0.15 },
+    { "name": "Friedberger Landstrasse", "weight": 0.14 },
+    { "name": "Theodor-Heuss-Allee", "weight": 0.15 },
+    { "name": "Miquelallee", "weight": 0.14 },
+    { "name": "Eschersheimer Landstrasse", "weight": 0.14 },
+    { "name": "Kennedyallee", "weight": 0.12 }
+  ]
+}

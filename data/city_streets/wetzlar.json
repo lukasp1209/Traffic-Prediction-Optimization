@@ -1,0 +1,12 @@
+{
+  "city": "Wetzlar",
+  "city_multiplier": 0.96,
+  "streets": [
+    { "name": "Karl-Kellner-Ring", "weight": 0.22 },
+    { "name": "Frankfurter Strasse", "weight": 0.18 },
+    { "name": "B49", "weight": 0.24 },
+    { "name": "Hermannsteiner Strasse", "weight": 0.13 },
+    { "name": "Bannstrasse", "weight": 0.11 },
+    { "name": "Nauborner Strasse", "weight": 0.12 }
+  ]
+}

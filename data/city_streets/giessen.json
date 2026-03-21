@@ -1,0 +1,14 @@
+{
+  "city": "Giessen",
+  "city_multiplier": 1.0,
+  "streets": [
+    { "name": "B49", "weight": 0.24 },
+    { "name": "A485", "weight": 0.18 },
+    { "name": "Licher Strasse", "weight": 0.11 },
+    { "name": "Marburger Strasse", "weight": 0.10 },
+    { "name": "Frankfurter Strasse", "weight": 0.09 },
+    { "name": "Schiffenberger Weg", "weight": 0.09 },
+    { "name": "Westanlage", "weight": 0.10 },
+    { "name": "Ringenallee", "weight": 0.09 }
+  ]
+}

@@ -1,0 +1,19 @@
+{
+  "name": "traffic-prediction-streamlit",
+  "version": "1.0.0",
+  "description": "Traffic Prediction & Optimization Streamlit App",
+  "scripts": {
+    "install-python": "pip install -r requirements.txt",
+    "dev": "streamlit run src/app.py",
+    "start": "streamlit run src/app.py --server.port 8501",
+    "api": "uvicorn src.api:app --host 0.0.0.0 --port 8000"
+  },
+  "keywords": [
+    "traffic",
+    "prediction",
+    "streamlit",
+    "machine-learning"
+  ],
+  "author": "Traffic Prediction Team",
+  "license": "MIT"
+}
