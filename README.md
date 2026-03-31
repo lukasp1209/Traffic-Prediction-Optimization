@@ -1,8 +1,6 @@
-﻿# Traffic Prediction & Optimization
+# Traffic Prediction & Optimization
 
-Dieses Repository enthält ein vollständiges Beispielprojekt zur Vorhersage von Verkehrsaufkommen mit Machine Learning. Der Fokus liegt auf Zeitreihenanalyse, Feature Engineering, dem Vergleich mehrerer Modellansätze sowie der Visualisierung und operativen Nutzung der Ergebnisse.
-
-Das Projekt eignet sich als Lernprojekt, Prototyp und als Grundlage für produktive Smart-City- oder Verkehrsmanagement-Anwendungen.
+Dieses Repository enthält ein Streamlit-basiertes Projekt zur Vorhersage von Verkehrsaufkommen mit Machine Learning. Der Fokus liegt auf Zeitreihenanalyse, Feature Engineering, Modellvergleich sowie einer lokalen, reproduzierbaren Demo für Prognose, Kartenansicht und Maßnahmenplanung.
 
 ## Projektübersicht
 
@@ -17,29 +15,17 @@ Abgedeckter Workflow:
 - Evaluation und Modellvergleich
 - Visualisierung der Ergebnisse
 - Operative Optimierung über eine Streamlit-Leitstellenansicht
-- API-orientierte Ausgabe für Integrationen
 
 ## Zielarchitektur
 
-Das Projekt ist auf eine erweiterbare Architektur mit TomTom Traffic API, Ticketmaster Events, eigener Datenbank, FastAPI und Streamlit ausgelegt.
+Das Projekt ist auf eine modulare, lokal lauffähige Streamlit-Architektur mit reproduzierbaren Datenquellen ausgelegt.
 
 Bausteine:
 
-- TomTom Traffic API für aktuelle Flow- und Incident-Daten
-- Ticketmaster Discovery API für stadtbezogene Event-Importe
-- FastAPI als Backend-Schicht für Ingestion und vereinheitlichte Endpunkte
-- Eigene Datenbank für persistierte Traffic-Snapshots
+- Lokale historische Verkehrsdaten und Demo-Straßendaten
+- JSON-basierte Referenzdaten für Straßen und Events
 - Streamlit als Leitstellen- und Analyse-Frontend
 - Machine-Learning-Pipeline auf Basis eigener historischer Daten
-
-Aktuelle Backend-Endpunkte:
-
-- `GET /health`
-- `GET /traffic/flow`
-- `GET /traffic/incidents`
-- `POST /ingestion/snapshot`
-- `POST /events/import/ticketmaster`
-- `GET /events`
 
 ## Datengrundlage
 
@@ -57,31 +43,10 @@ Aktuelle Backend-Endpunkte:
 
 Das Projekt unterstützt:
 
-- synthetisch generierte, realistische Verkehrsdaten
+- lokale Demo-Datensätze mit echten Straßennamen
 - Import eigener CSV-Dateien
 - historische CSVs für Kartenansichten
-- JSON-basierte Live-APIs für Verkehrsdaten
-
-## Workflow im Notebook
-
-1. Daten laden oder generieren
-2. Explorative Datenanalyse
-3. Feature Engineering
-4. Zeitreihen-konformer Train/Test-Split
-5. Modelltraining
-6. Evaluation und Vergleich
-7. Visualisierung der Prognosen
-8. Optionale Modelloptimierung
-
-Typische Analysebausteine:
-
-- Zeitverläufe
-- Tages- und Wochenmuster
-- Verteilungen
-- Kalenderfeatures
-- Lag-Features
-- Rolling Statistics
-- Wetter- und Feiertagsindikatoren
+- JSON-basierte Referenzdaten für lokale Karten- und Event-Demos
 
 ## Streamlit App
 
@@ -94,8 +59,7 @@ Funktionen der App:
 - Maßnahmenbasierte Verkehrsoptimierung
 - KPI-Dashboard mit Alerts und Anomalie-Erkennung
 - Kartenansicht für Straßenbelastung
-- API-Modus für strukturierte JSON-Ausgaben
-- Optionale Anbindung an ein FastAPI-Backend als Datenquelle
+- Vollständig lokal nutzbar ohne Backend und ohne externe API-Keys
 
 ## Repository-Struktur
 
@@ -107,11 +71,9 @@ Funktionen der App:
 |   |-- guides/            Leitfäden
 |   `-- reference/         Glossar und Referenzen
 |-- notebooks/             Analyse-, Konzept- und EDA-Notebooks
-|-- src/                   Streamlit-App, FastAPI und Python-Pakete
+|-- src/                   Streamlit-App und Python-Pakete
 |   |-- app.py             Einstiegspunkt für Streamlit
-|   |-- api.py             Einstiegspunkt für FastAPI
-|   |-- traffic_app/       Modulare Streamlit-Logik
-|   `-- traffic_backend/   Modulare Backend-Logik
+|   `-- traffic_app/       Modulare Streamlit-Logik
 |-- .env.example
 |-- Dockerfile
 |-- docker-compose.yml
@@ -124,17 +86,16 @@ Funktionen der App:
 
 ### Lokal
 
-Streamlit starten:
+1. Abhängigkeiten installieren:
 
 ```bash
 pip install -r requirements.txt
-streamlit run src/app.py
 ```
 
-FastAPI starten:
+2. Streamlit starten:
 
 ```bash
-uvicorn src.api:app --host 0.0.0.0 --port 8000
+streamlit run src/app.py
 ```
 
 ### Docker
@@ -143,8 +104,7 @@ uvicorn src.api:app --host 0.0.0.0 --port 8000
 docker compose up --build
 ```
 
-Danach ist die Streamlit-App unter `http://localhost:8501` erreichbar.  
-Das Backend läuft unter `http://localhost:8000`.
+Danach ist die Streamlit-App unter `http://localhost:8501` erreichbar.
 
 ## Wichtige Inhalte
 
@@ -152,18 +112,19 @@ Das Backend läuft unter `http://localhost:8000`.
 
 - `src/app.py` - schlanker Einstiegspunkt für Streamlit
 - `src/traffic_app/` - modulare Fachlogik für Daten, Karten, Forecasting, Optimierung und UI
-- `src/api.py` - Einstiegspunkt für FastAPI
-- `src/traffic_backend/` - Backend-Logik für Konfiguration, Datenbank, TomTom-Client und API-Endpunkte
 
 ### Notebooks
 
-- `notebooks/Q-Phase_Conception.ipynb` - Konzeptphase
-- `notebooks/U-Phase_EDA.ipynb` - explorative Datenanalyse
-- `notebooks/A-Phase.ipynb` - weiterführende Analyse
+- `notebooks/Q-Phase_Question.ipynb` - Fragestellung und Projektkontext
+- `notebooks/U-Phase_Understanding.ipynb` - explorative Datenanalyse und Datenverständnis
+- `notebooks/A-Phase_Algorithms.ipynb` - Modelltraining und Vergleich
+- `notebooks/C-Phase_Conclude.ipynb` - Bewertung und Entscheidung
+- `notebooks/K-Phase_Knowledge.ipynb` - Übergabe und Deployment-Überlegungen
 
 ### Dokumentation
 
 - `docs/guides/user-guide.md` - Nutzer- und Projektleitfaden
+- `docs/guides/model-card.md` - Model Card
 - `docs/reference/glossary.md` - Glossar
 - `docs/ai/tool-disclosure.md` - KI-Offenlegung
 
@@ -189,25 +150,15 @@ Das Projekt eignet sich unter anderem für:
 - Lern- und Hochschulprojekte im Bereich Data Science
 - Prototypen für Smart-City-Anwendungen
 - Verkehrsleitstellen und kommunale Entscheidungsunterstützung
-- Demonstratoren für Forecasting, Visual Analytics und API-Ausgabe
+- Demonstratoren für Forecasting und Visual Analytics
 
 ## Konfiguration
 
-Für das Backend kann eine `.env` auf Basis von `.env.example` verwendet werden.
-
-Wichtige Variablen:
-
-- `TOMTOM_API_KEY`
-- `TICKETMASTER_API_KEY`
-- `DATABASE_URL`
-- `BACKEND_API_TOKEN`
-- `DEFAULT_BBOX`
+Die Streamlit-App benötigt aktuell keine zwingenden `.env`-Variablen. Die Datei kann leer bleiben oder komplett entfallen.
 
 ## Entwicklungsnotizen
 
 - Python-Abhängigkeiten liegen zentral in `requirements.txt`
 - Die Streamlit-App ist modular unter `src/traffic_app/` aufgebaut
-- Das FastAPI-Backend liegt modular unter `src/traffic_backend/`
 - Generierte Artefakte wie `node_modules`, `__pycache__` und IDE-Dateien sind über `.gitignore` ausgeschlossen
-- Docker und lokaler Start nutzen dieselben Entry Points
-
+- Docker und lokaler Start nutzen denselben Streamlit-Entry-Point

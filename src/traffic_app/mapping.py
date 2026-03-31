@@ -16,6 +16,15 @@ from .domain import CityStreetReference
 from .streamlit_compat import cache_data
 from .text_utils import build_overpass_name_regex, canonicalize_text
 
+CITY_VIEW_DEFAULTS = {
+    "darmstadt": {"latitude": 49.8728, "longitude": 8.6512, "zoom": 12.4},
+}
+
+
+def get_city_view_defaults(selected_city: str) -> dict[str, float]:
+    city_key = canonicalize_text(selected_city)
+    return CITY_VIEW_DEFAULTS.get(city_key, {"latitude": 51.1657, "longitude": 10.4515, "zoom": 6.0})
+
 
 def normalize_street_key(value: str) -> str:
     normalized = canonicalize_text(value)
@@ -211,42 +220,45 @@ def get_street_geometry(city_name: str, street_name: str, reference: CityStreetR
     overpass_geometry = fetch_street_geometry_overpass(city_name, street_name)
     if overpass_geometry is not None:
         return overpass_geometry
-
-    city_key = canonicalize_text(city_name)
-    street_key = canonicalize_text(street_name)
-    return reference.geometries.get(city_key, {}).get(street_key)
+    return None
 
 
 def resolve_selected_street_geometries(
         selected_city: str,
         selected_streets: List[str],
         reference: CityStreetReference,
+        allow_overpass_fallback: bool = True,
 ) -> pd.DataFrame:
-    geometry_df = fetch_all_city_streets_overpass(selected_city)
-    if not geometry_df.empty:
-        geometry_df = geometry_df.copy()
-        geometry_df["street_key"] = geometry_df["street"].apply(canonicalize_text)
-        requested_df = pd.DataFrame(
-            {
-                "street": selected_streets,
-                "street_key": [canonicalize_text(street) for street in selected_streets],
-            }
-        )
-        matched_df = requested_df.merge(
-            geometry_df[["street_key", "street_geometry"]],
-            on="street_key",
-            how="left",
-        ).drop(columns=["street_key"])
-        matched_df = matched_df.dropna(subset=["street_geometry"]).reset_index(drop=True)
-        if not matched_df.empty:
-            return matched_df
-
     geometry_rows = []
     for street in selected_streets:
         geom = get_street_geometry(selected_city, street, reference)
         if geom is not None:
             geometry_rows.append({"street": street, "street_geometry": geom})
-    return pd.DataFrame(geometry_rows)
+    if geometry_rows:
+        return pd.DataFrame(geometry_rows)
+
+    if not allow_overpass_fallback:
+        return pd.DataFrame(columns=["street", "street_geometry"])
+
+    # Fallback: if direct lookups fail, use the broader city-level Overpass result once.
+    geometry_df = fetch_all_city_streets_overpass(selected_city)
+    if geometry_df.empty:
+        return pd.DataFrame(columns=["street", "street_geometry"])
+
+    geometry_df = geometry_df.copy()
+    geometry_df["street_key"] = geometry_df["street"].apply(canonicalize_text)
+    requested_df = pd.DataFrame(
+        {
+            "street": selected_streets,
+            "street_key": [canonicalize_text(street) for street in selected_streets],
+        }
+    )
+    matched_df = requested_df.merge(
+        geometry_df[["street_key", "street_geometry"]],
+        on="street_key",
+        how="left",
+    ).drop(columns=["street_key"])
+    return matched_df.dropna(subset=["street_geometry"]).reset_index(drop=True)
 
 
 def build_street_map_data(
@@ -258,6 +270,7 @@ def build_street_map_data(
         reference: CityStreetReference,
         include_all_city_streets: bool = False,
         max_streets: int = 500,
+        fast_mode: bool = True,
         traffic_df: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     source_df = traffic_df.copy() if traffic_df is not None else city_street_df.copy()
@@ -298,17 +311,17 @@ def build_street_map_data(
         )
 
     if show_all_streets:
-        geometry_df = fetch_all_city_streets_overpass(selected_city)
-        if geometry_df.empty:
-            geometry_rows = []
-            fallback_streets = sorted(set(city_filtered["street"].dropna().tolist()))
-            for street in fallback_streets:
-                geom = get_street_geometry(selected_city, street, reference)
-                if geom is not None:
-                    geometry_rows.append({"street": street, "street_geometry": geom})
-            geometry_df = pd.DataFrame(geometry_rows)
+        if fast_mode:
+            geometry_df = pd.DataFrame(columns=["street", "street_geometry"])
+        else:
+            geometry_df = fetch_all_city_streets_overpass(selected_city)
     else:
-        geometry_df = resolve_selected_street_geometries(selected_city, selected_streets, reference)
+        geometry_df = resolve_selected_street_geometries(
+            selected_city,
+            selected_streets,
+            reference,
+            allow_overpass_fallback=not fast_mode,
+        )
 
     if geometry_df.empty:
         return pd.DataFrame()
@@ -342,6 +355,16 @@ def build_street_map_data(
 
 
 def compute_map_view_state(map_df: pd.DataFrame, selected_city: str) -> pdk.ViewState:
+    city_defaults = get_city_view_defaults(selected_city)
+    if map_df.empty:
+        return pdk.ViewState(
+            latitude=city_defaults["latitude"],
+            longitude=city_defaults["longitude"],
+            zoom=city_defaults["zoom"],
+            pitch=10,
+            bearing=0,
+        )
+
     coords = np.array([coord for path in map_df["street_geometry"] for coord in path], dtype=float)
     min_lon, min_lat = coords.min(axis=0)
     max_lon, max_lat = coords.max(axis=0)
@@ -349,6 +372,9 @@ def compute_map_view_state(map_df: pd.DataFrame, selected_city: str) -> pdk.View
     center_lat = float((min_lat + max_lat) / 2)
     span = max(max(float(max_lon - min_lon), 0.01), max(float(max_lat - min_lat), 0.01))
     zoom = min(max(11.8 - math.log(span, 2), 10.0), 13.2)
+
+    if canonicalize_text(selected_city) in CITY_VIEW_DEFAULTS:
+        zoom = max(zoom, city_defaults["zoom"])
 
     return pdk.ViewState(latitude=center_lat, longitude=center_lon, zoom=zoom, pitch=10, bearing=0)
 

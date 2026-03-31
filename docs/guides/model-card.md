@@ -1,4 +1,4 @@
-# Model Card (Kurzfassung)
+# Model Card
 
 ## Modell
 - Name: RandomForest

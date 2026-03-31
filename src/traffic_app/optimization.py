@@ -75,9 +75,9 @@ def get_selected_measures() -> Dict[str, int]:
     scenario_name = st.selectbox("Scenario Preset", list(SCENARIOS.keys()), index=1)
     scenario = SCENARIOS[scenario_name]
 
-    st.caption(f"Ausgewaehltes Preset: {scenario.name}")
+    st.caption(f"Ausgewähltes Preset: {scenario.name}")
     signal = st.slider("Ampelsteuerung", 0, 100, scenario.signal, 5)
-    pt = st.slider("OePNV-Verstaerkung", 0, 100, scenario.public_transport, 5)
+    pt = st.slider("ÖPNV-Verstärkung", 0, 100, scenario.public_transport, 5)
     home = st.slider("Homeoffice-Anreiz", 0, 100, scenario.home_office, 5)
     construction = st.slider("Baustellen-Taktung", 0, 100, scenario.construction, 5)
     return {

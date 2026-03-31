@@ -5,8 +5,7 @@
   "scripts": {
     "install-python": "pip install -r requirements.txt",
     "dev": "streamlit run src/app.py",
-    "start": "streamlit run src/app.py --server.port 8501",
-    "api": "uvicorn src.api:app --host 0.0.0.0 --port 8000"
+    "start": "streamlit run src/app.py --server.port 8501"
   },
   "keywords": [
     "traffic",

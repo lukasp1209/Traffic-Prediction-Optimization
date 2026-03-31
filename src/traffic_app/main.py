@@ -74,7 +74,7 @@ def prepare_city_street_data(
         and "street" not in normalized_df.columns
     )
     if source != "Darmstadt Testdatensatz" and not {"city", "street"}.issubset(set(normalized_df.columns)):
-        raise ValueError("Neue Staedte muessen per CSV mit den Spalten city, street, ds und y geliefert werden.")
+        raise ValueError("Neue Städte müssen per CSV mit den Spalten city, street, ds und y geliefert werden.")
     if uses_demo_city_streets:
         return ensure_city_street_schema(normalized_df, reference)
     return normalized_df.copy()
@@ -109,7 +109,7 @@ def build_selected_city_series(city_street_df: pd.DataFrame, selected_city: str)
         .reset_index(drop=True)
     )
     if selected_city_df.empty:
-        raise ValueError("Fuer die ausgewaehlte Stadt liegen keine historischen Forecast-Daten vor. Bitte CSV-Daten fuer diese Stadt laden.")
+        raise ValueError("Für die ausgewählte Stadt liegen keine historischen Forecast-Daten vor. Bitte CSV-Daten für diese Stadt laden.")
     return selected_city_df
 
 
@@ -128,7 +128,7 @@ def get_available_timestamps(
         return available_timestamps
 
     fallback_now = pd.Timestamp.utcnow().tz_localize(None)
-    st.warning("Keine gueltigen Zeitstempel fuer die Kartenquelle gefunden. Es wird ein aktueller Zeitpunkt verwendet.")
+    st.warning("Keine gültigen Zeitstempel für die Kartenquelle gefunden. Es wird ein aktueller Zeitpunkt verwendet.")
     return [fallback_now, fallback_now]
 
 
@@ -171,7 +171,7 @@ def run_app() -> None:
     with st.sidebar:
         with st.expander("Raumbezug", expanded=True):
             if preview_error:
-                st.caption("Stadtauswahl wird aktiv, sobald eine gueltige Datenquelle geladen ist.")
+                st.caption("Stadtauswahl wird aktiv, sobald eine gültige Datenquelle geladen ist.")
                 selected_city = st.text_input("Stadt", value="Darmstadt").strip() or "Darmstadt"
                 selected_streets = []
             else:
@@ -188,19 +188,22 @@ def run_app() -> None:
                     preview_city_street_df.loc[preview_city_street_df["city"] == selected_city, "street"].dropna().unique().tolist()
                 )
                 if street_options:
-                    selected_streets = st.multiselect("Strassenfilter fuer Karte", options=street_options, default=[])
-                    st.caption("Keine Auswahl bedeutet: alle darstellbaren Strassen der Stadt auf der Karte anzeigen.")
+                    selected_streets = st.multiselect("Straßenfilter für Karte", options=street_options, default=[])
+                    st.caption("Keine Auswahl bedeutet: alle darstellbaren Straßen der Stadt auf der Karte anzeigen.")
                 else:
                     selected_streets = []
-                    st.caption("Keine lokalen Strassendaten fuer diese Stadt im Datensatz. Fuer die Karte werden OSM-Strassen verwendet.")
+                    st.caption("Keine lokalen Straßendaten für diese Stadt im Datensatz. Für die Karte werden OSM-Straßen verwendet.")
 
         with st.expander("Kartenquelle", expanded=False):
             map_data_source = st.selectbox(
                 "Auslastungsdaten",
-                ("Primaerdatensatz", "Historische CSV"),
+                ("Primärdatensatz", "Historische CSV"),
             )
-            include_all_city_streets = st.checkbox("Alle OSM-Strassen der Stadt anzeigen", value=False)
-            max_map_streets = st.slider("Max. Strassen auf Karte", min_value=500, max_value=10000, value=3000, step=500)
+            fast_map_mode = st.checkbox("Schnellmodus für Karte", value=True)
+            include_all_city_streets = st.checkbox("Alle OSM-Straßen der Stadt anzeigen", value=False)
+            max_map_streets = st.slider("Max. Straßen auf Karte", min_value=500, max_value=10000, value=3000, step=500)
+            if fast_map_mode:
+                st.caption("Schnellmodus vermeidet große Overpass-Abfragen und bevorzugt lokale oder bereits gecachte Geometrien.")
 
             map_uploaded_csv = None
 
@@ -212,7 +215,7 @@ def run_app() -> None:
             measures = get_selected_measures()
 
         with st.expander("Event-Kalender", expanded=False):
-            st.caption("Events werden als zusaetzliche Einflussgroesse im Datensatz und Forecast beruecksichtigt.")
+            st.caption("Events werden als zusätzliche Einflussgröße im Datensatz und Forecast berücksichtigt.")
             default_event_frame = build_event_frame_for_city(selected_city, event_reference)
             event_frame = st.data_editor(
                 default_event_frame,
@@ -243,6 +246,7 @@ def run_app() -> None:
                     selected_city=selected_city,
                     selected_streets=selected_streets,
                     map_data_source=map_data_source,
+                    fast_map_mode=fast_map_mode,
                     include_all_city_streets=include_all_city_streets,
                     max_map_streets=max_map_streets,
                     map_uploaded_payload=serialize_upload(map_uploaded_csv),
@@ -260,6 +264,7 @@ def run_app() -> None:
             selected_city=selected_city,
             selected_streets=selected_streets,
             map_data_source=map_data_source,
+            fast_map_mode=fast_map_mode,
             include_all_city_streets=include_all_city_streets,
             max_map_streets=max_map_streets,
             map_uploaded_payload=serialize_upload(map_uploaded_csv),
@@ -270,7 +275,7 @@ def run_app() -> None:
 
     applied = st.session_state.get("analysis_state")
     if applied is None:
-        st.info("Bitte zuerst eine gueltige Datenquelle waehlen und die Analyse aktualisieren.")
+        st.info("Bitte zuerst eine gültige Datenquelle wählen und die Analyse aktualisieren.")
         return
 
     try:
@@ -281,8 +286,8 @@ def run_app() -> None:
         )
         if applied["source"] == "Darmstadt Testdatensatz" and {"city", "street"}.isdisjoint(set(read_csv_file(str(DEFAULT_DATA)).columns)):
             st.info(
-                "Hinweis: Die aktuelle Datei enthaelt keine city/street-Spalten. "
-                "Die App verwendet deshalb ein Demo-Strassennetz aus JSON-Dateien unter data/city_streets."
+                "Hinweis: Die aktuelle Datei enthält keine city/street-Spalten. "
+                "Die App verwendet deshalb ein Demo-Straßennetz aus JSON-Dateien unter data/city_streets."
             )
 
         selected_city_df = build_selected_city_series(city_street_df, applied["selected_city"])
@@ -341,11 +346,12 @@ def run_app() -> None:
         render_ops_tab(
             city_street_df=city_street_df,
             map_traffic_df=map_traffic_df,
-            selected_city=applied["selected_city"],
-            selected_streets=applied["selected_streets"],
-            include_all_city_streets=applied["include_all_city_streets"],
-            max_map_streets=applied["max_map_streets"],
-            map_data_source=applied["map_data_source"],
+              selected_city=applied["selected_city"],
+              selected_streets=applied["selected_streets"],
+              include_all_city_streets=applied["include_all_city_streets"],
+              max_map_streets=applied["max_map_streets"],
+              fast_map_mode=applied["fast_map_mode"],
+              map_data_source=applied["map_data_source"],
             reference=reference,
             measures=applied["measures"],
             alerts_df=alerts_df,

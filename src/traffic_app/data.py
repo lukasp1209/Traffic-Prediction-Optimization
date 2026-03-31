@@ -143,7 +143,7 @@ def read_open_traffic_zip_bytes(payload: bytes, city_name: str = "Darmstadt", in
     with ZipFile(BytesIO(payload)) as archive:
         members = [name for name in archive.namelist() if name.lower().endswith(".csv")]
         if not members:
-            raise ValueError("Die ZIP-Datei enthaelt keine CSV-Dateien.")
+            raise ValueError("Die ZIP-Datei enthält keine CSV-Dateien.")
 
         for member in sorted(members):
             raw_bytes = archive.read(member)
@@ -190,7 +190,7 @@ def read_open_traffic_zip_bytes(payload: bytes, city_name: str = "Darmstadt", in
                 frames.append(hourly_df)
 
     if not frames:
-        raise ValueError("Aus der ZIP-Datei konnten keine gueltigen Zeitreihen gelesen werden.")
+        raise ValueError("Aus der ZIP-Datei konnten keine gültigen Zeitreihen gelesen werden.")
 
     combined = pd.concat(frames, ignore_index=True)
     combined["y"] = pd.to_numeric(combined["y"], errors="coerce")
@@ -304,7 +304,7 @@ def normalize_input(df: pd.DataFrame) -> pd.DataFrame:
             rename_map[col] = "y"
         elif low in {"stadt"}:
             rename_map[col] = "city"
-        elif low in {"strasse", "straÃŸe"}:
+        elif low in {"strasse", "straße"}:
             rename_map[col] = "street"
 
     data = data.rename(columns=rename_map)
@@ -382,7 +382,7 @@ def ensure_city_street_schema(df: pd.DataFrame, reference: CityStreetReference) 
                 parts.append(street_df)
 
         if not parts:
-            raise ValueError("Demo-Stadtdaten sind leer. Bitte JSON-Dateien unter data/city_streets pruefen.")
+            raise ValueError("Demo-Stadtdaten sind leer. Bitte JSON-Dateien unter data/city_streets prüfen.")
 
         expanded = pd.concat(parts, ignore_index=True)
         expanded["y"] = expanded["y"].clip(lower=0)
