@@ -5,14 +5,13 @@ from pathlib import Path
 from typing import Dict, List
 
 import pandas as pd
-import requests
-import streamlit as st
 
 from .domain import CityEvent
+from .streamlit_compat import cache_data
 from .text_utils import canonicalize_text
 
 
-@st.cache_data(show_spinner=False)
+@cache_data(show_spinner=False)
 def load_city_event_reference(config_dir: str) -> Dict[str, List[CityEvent]]:
     config_path = Path(config_dir)
     if not config_path.exists():
@@ -133,61 +132,3 @@ def get_event_feature_values(timestamp: pd.Timestamp, selected_city: str, event_
         if start_ts <= timestamp <= end_ts:
             return 1, float(event.impact_level)
     return 0, 0.0
-
-
-@st.cache_data(show_spinner=False, ttl=60)
-def fetch_backend_events(api_url: str, api_token: str, city: str) -> pd.DataFrame:
-    if not api_url.strip() or not city.strip():
-        return pd.DataFrame(columns=["name", "start", "end", "impact_level", "category"])
-
-    headers = {"User-Agent": "traffic-prediction-optimization/1.0"}
-    if api_token.strip():
-        headers["x-api-token"] = api_token.strip()
-
-    try:
-        response = requests.get(
-            f"{api_url.rstrip('/')}/events",
-            params={"city": city},
-            headers=headers,
-            timeout=20,
-        )
-        response.raise_for_status()
-        payload = response.json()
-    except Exception:
-        return pd.DataFrame(columns=["name", "start", "end", "impact_level", "category"])
-
-    rows = []
-    for event in payload.get("events", []):
-        rows.append(
-            {
-                "name": event.get("name", "Event"),
-                "start": event.get("start_at", ""),
-                "end": event.get("end_at", ""),
-                "impact_level": event.get("impact_level", 1.0),
-                "category": event.get("category", "general") or "general",
-            }
-        )
-
-    return pd.DataFrame(rows)
-
-
-def import_ticketmaster_events(api_url: str, api_token: str, city: str, size: int = 30) -> bool:
-    if not api_url.strip() or not city.strip():
-        return False
-
-    headers = {"User-Agent": "traffic-prediction-optimization/1.0"}
-    if api_token.strip():
-        headers["x-api-token"] = api_token.strip()
-
-    try:
-        response = requests.post(
-            f"{api_url.rstrip('/')}/events/import/ticketmaster",
-            params={"city": city, "country_code": "DE", "size": size},
-            headers=headers,
-            timeout=30,
-        )
-        response.raise_for_status()
-        fetch_backend_events.clear()
-        return True
-    except Exception:
-        return False

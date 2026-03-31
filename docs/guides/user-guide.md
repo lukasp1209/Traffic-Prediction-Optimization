@@ -190,4 +190,4 @@ Nein. Die Notebooks sind so aufgebaut, dass Sie nur die Parameter anpassen müss
 
 **🎉 Viel Erfolg mit Ihren Verkehrsprognosen!**
 
-*Letzte Aktualisierung: Februar 2026*
+*Letzte Aktualisierung: März 2026*

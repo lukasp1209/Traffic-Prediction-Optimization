@@ -1,20 +1,208 @@
 from __future__ import annotations
 
+import csv
+from io import BytesIO
 import json
 from pathlib import Path
+import re
 from typing import Dict, List
+from zipfile import ZipFile
 
 import numpy as np
 import pandas as pd
-import requests
-import streamlit as st
-
 from .config import NUMERIC_FEATURES
 from .domain import CityStreetReference
+from .streamlit_compat import cache_data
 from .text_utils import canonicalize_text
 
 
-@st.cache_data(show_spinner=False)
+@cache_data(show_spinner=False)
+def read_csv_file(path: str) -> pd.DataFrame:
+    return pd.read_csv(path)
+
+
+@cache_data(show_spinner=False)
+def read_csv_bytes(payload: bytes) -> pd.DataFrame:
+    return pd.read_csv(BytesIO(payload))
+
+
+def _read_delimited_bytes(payload: bytes) -> pd.DataFrame:
+    for encoding in ("utf-8-sig", "utf-8", "latin-1"):
+        try:
+            sample = payload[:4096].decode(encoding)
+        except UnicodeDecodeError:
+            continue
+
+        delimiter = None
+        try:
+            delimiter = csv.Sniffer().sniff(sample, delimiters=";,\t").delimiter
+        except csv.Error:
+            delimiter = None
+
+        try:
+            if delimiter is not None:
+                return pd.read_csv(BytesIO(payload), sep=delimiter, encoding=encoding)
+            return pd.read_csv(BytesIO(payload), sep=None, engine="python", encoding=encoding)
+        except Exception:
+            continue
+
+    return pd.read_csv(BytesIO(payload))
+
+
+def _clean_columns(df: pd.DataFrame) -> pd.DataFrame:
+    cleaned = df.copy()
+    cleaned.columns = [str(column).replace("\ufeff", "").strip() for column in cleaned.columns]
+    return cleaned
+
+
+def _extract_open_traffic_timestamp(df: pd.DataFrame) -> pd.Series:
+    data = _clean_columns(df)
+    normalized_names = {column: canonicalize_text(str(column)).replace(" ", "") for column in data.columns}
+    preferred_candidates = [
+        "intervallbeginn(lokalzeit)",
+        "ds",
+        "timestamp",
+        "datetime",
+        "zeitpunkt",
+        "datumzeit",
+        "datetimeutc",
+        "intervallbeginn(utc)",
+    ]
+
+    for candidate in preferred_candidates:
+        for column, normalized in normalized_names.items():
+            if normalized != candidate:
+                continue
+            parsed = pd.to_datetime(data[column], errors="coerce", dayfirst=True)
+            if parsed.notna().any():
+                return parsed
+
+    date_column = None
+    time_column = None
+    for column, normalized in normalized_names.items():
+        if date_column is None and "datum" in normalized:
+            date_column = column
+        if date_column is None and normalized == "date":
+            date_column = column
+        if time_column is None and normalized in {"uhrzeit", "zeit", "time"}:
+            time_column = column
+
+    if date_column and time_column:
+        combined = pd.to_datetime(
+            data[date_column].astype(str).str.strip() + " " + data[time_column].astype(str).str.strip(),
+            errors="coerce",
+            dayfirst=True,
+        )
+        if combined.notna().any():
+            return combined
+
+    for column in data.columns[:3]:
+        parsed = pd.to_datetime(data[column], errors="coerce", dayfirst=True)
+        if parsed.notna().mean() >= 0.7:
+            return parsed
+
+    return pd.Series(pd.NaT, index=data.index, dtype="datetime64[ns]")
+
+
+def _detect_open_traffic_measurements(df: pd.DataFrame) -> list[tuple[str, str, str]]:
+    measurements: list[tuple[str, str, str]] = []
+
+    for column in df.columns:
+        label = str(column).strip()
+        if "(Belegungen/Intervall)" in label:
+            sensor_id = label.split("(", 1)[0].strip()
+            measurements.append((column, sensor_id, "count"))
+            continue
+        if "(Verweilzeit/Intervall)" in label:
+            sensor_id = label.split("(", 1)[0].strip()
+            measurements.append((column, sensor_id, "dwell_time"))
+            continue
+
+        compact = re.sub(r"[^A-Za-z0-9]", "", label).upper()
+        match = re.match(r"^(D\d+)([A-Z])$", compact)
+        if not match:
+            continue
+
+        sensor_id, suffix = match.groups()
+        metric = "count" if suffix == "Z" else "occupancy" if suffix == "B" else "value"
+        measurements.append((column, sensor_id, metric))
+
+    if measurements:
+        count_measurements = [item for item in measurements if item[2] == "count"]
+        return count_measurements or measurements
+
+    fallback_columns = [column for column in df.select_dtypes(include=[np.number]).columns]
+    return [(column, canonicalize_text(str(column)).upper(), "value") for column in fallback_columns]
+
+
+@cache_data(show_spinner=False)
+def read_open_traffic_zip_bytes(payload: bytes, city_name: str = "Darmstadt", intersection_name: str = "") -> pd.DataFrame:
+    frames: list[pd.DataFrame] = []
+    zip_label = Path(intersection_name or "OpenTrafficData").stem
+
+    with ZipFile(BytesIO(payload)) as archive:
+        members = [name for name in archive.namelist() if name.lower().endswith(".csv")]
+        if not members:
+            raise ValueError("Die ZIP-Datei enthält keine CSV-Dateien.")
+
+        for member in sorted(members):
+            raw_bytes = archive.read(member)
+            month_df = _clean_columns(_read_delimited_bytes(raw_bytes))
+            if month_df.empty:
+                continue
+
+            timestamps = _extract_open_traffic_timestamp(month_df)
+            if timestamps.notna().sum() == 0:
+                continue
+
+            measurement_columns = _detect_open_traffic_measurements(month_df)
+            if not measurement_columns:
+                continue
+
+            for column, sensor_id, metric in measurement_columns:
+                values = pd.to_numeric(month_df[column], errors="coerce")
+                if values.notna().sum() == 0:
+                    continue
+
+                source_name = Path(member).stem
+                sensor_label = f"{zip_label} - {sensor_id}{'Z' if metric == 'count' else 'B' if metric == 'occupancy' else ''}"
+                sensor_df = pd.DataFrame(
+                    {
+                        "ds": timestamps,
+                        "y": values,
+                        "city": city_name,
+                        "street": sensor_label,
+                        "sensor_id": sensor_id,
+                        "metric": metric,
+                        "source_file": source_name,
+                    }
+                ).dropna(subset=["ds", "y"])
+                if sensor_df.empty:
+                    continue
+
+                sensor_df["ds"] = sensor_df["ds"].dt.floor("h")
+                agg_fn = "sum" if metric == "count" else "mean"
+                hourly_df = (
+                    sensor_df.groupby(["ds", "city", "street", "sensor_id", "metric"], as_index=False)
+                    .agg(y=("y", agg_fn))
+                    .sort_values("ds")
+                )
+                frames.append(hourly_df)
+
+    if not frames:
+        raise ValueError("Aus der ZIP-Datei konnten keine gültigen Zeitreihen gelesen werden.")
+
+    combined = pd.concat(frames, ignore_index=True)
+    combined["y"] = pd.to_numeric(combined["y"], errors="coerce")
+    combined["city"] = combined["city"].astype(str).str.strip()
+    combined["street"] = combined["street"].astype(str).str.strip()
+    combined = combined.dropna(subset=["ds", "y", "city", "street"])
+    if combined.empty:
+        raise ValueError("Die gelesenen ZIP-Daten enthalten keine verwendbaren Werte.")
+    return combined.sort_values(["street", "ds"]).reset_index(drop=True)
+
+
+@cache_data(show_spinner=False)
 def load_city_street_reference(config_dir: str) -> CityStreetReference:
     default_multipliers = {}
 
@@ -73,7 +261,7 @@ def load_city_street_reference(config_dir: str) -> CityStreetReference:
     )
 
 
-@st.cache_data(show_spinner=False)
+@cache_data(show_spinner=False)
 def generate_synthetic_data(periods: int, seed: int) -> pd.DataFrame:
     np.random.seed(seed)
     ds = pd.date_range(start="2023-01-01", periods=periods, freq="h")
@@ -102,7 +290,7 @@ def generate_synthetic_data(periods: int, seed: int) -> pd.DataFrame:
     return engineer_features(df)
 
 
-@st.cache_data(show_spinner=False)
+@cache_data(show_spinner=False)
 def normalize_input(df: pd.DataFrame) -> pd.DataFrame:
     data = df.copy()
     data.columns = [str(column).strip() for column in data.columns]
@@ -116,7 +304,7 @@ def normalize_input(df: pd.DataFrame) -> pd.DataFrame:
             rename_map[col] = "y"
         elif low in {"stadt"}:
             rename_map[col] = "city"
-        elif low in {"strasse", "straÃŸe"}:
+        elif low in {"strasse", "straße"}:
             rename_map[col] = "street"
 
     data = data.rename(columns=rename_map)
@@ -151,7 +339,7 @@ def normalize_input(df: pd.DataFrame) -> pd.DataFrame:
     return data.dropna(subset=["ds", "y"]).sort_values("ds").reset_index(drop=True)
 
 
-@st.cache_data(show_spinner=False)
+@cache_data(show_spinner=False)
 def engineer_features(df: pd.DataFrame) -> pd.DataFrame:
     data = df.copy()
     data["hour"] = data["ds"].dt.hour
@@ -194,7 +382,7 @@ def ensure_city_street_schema(df: pd.DataFrame, reference: CityStreetReference) 
                 parts.append(street_df)
 
         if not parts:
-            raise ValueError("Demo-Stadtdaten sind leer. Bitte JSON-Dateien unter data/city_streets pruefen.")
+            raise ValueError("Demo-Stadtdaten sind leer. Bitte JSON-Dateien unter data/city_streets prüfen.")
 
         expanded = pd.concat(parts, ignore_index=True)
         expanded["y"] = expanded["y"].clip(lower=0)
@@ -213,99 +401,3 @@ def aggregate_city_series(df: pd.DataFrame, selected_city: str, selected_streets
     if filtered.empty:
         return filtered
     return filtered.groupby("ds", as_index=False)["y"].sum().sort_values("ds").reset_index(drop=True)
-
-
-@st.cache_data(show_spinner=False, ttl=60)
-def fetch_live_traffic_records(api_url: str, bearer_token: str) -> pd.DataFrame:
-    if not api_url.strip():
-        return pd.DataFrame()
-
-    headers = {"User-Agent": "traffic-prediction-optimization/1.0"}
-    if bearer_token.strip():
-        headers["Authorization"] = f"Bearer {bearer_token.strip()}"
-
-    try:
-        response = requests.get(api_url.strip(), headers=headers, timeout=20)
-        response.raise_for_status()
-        payload = response.json()
-    except Exception:
-        return pd.DataFrame()
-
-    records = payload.get("records", []) if isinstance(payload, dict) else payload
-    if not isinstance(records, list):
-        return pd.DataFrame()
-
-    data = pd.DataFrame(records)
-    if data.empty:
-        return data
-
-    rename_map = {}
-    for col in data.columns:
-        low = str(col).strip().lower()
-        if low in {"timestamp", "datetime", "time", "zeit", "zeitpunkt"}:
-            rename_map[col] = "ds"
-        elif low in {"value", "count", "traffic", "flow", "y", "verkehr"}:
-            rename_map[col] = "y"
-        elif low in {"city", "stadt"}:
-            rename_map[col] = "city"
-        elif low in {"street", "strasse", "straÃŸe"}:
-            rename_map[col] = "street"
-
-    data = data.rename(columns=rename_map)
-    if "ds" not in data.columns:
-        data["ds"] = pd.Timestamp.utcnow()
-
-    if not {"city", "street", "y", "ds"}.issubset(set(data.columns)):
-        return pd.DataFrame()
-
-    data["ds"] = pd.to_datetime(data["ds"], errors="coerce")
-    data["y"] = pd.to_numeric(data["y"], errors="coerce")
-    data["city"] = data["city"].astype(str).str.strip()
-    data["street"] = data["street"].astype(str).str.strip()
-    return data.dropna(subset=["ds", "y", "city", "street"]).reset_index(drop=True)
-
-
-@st.cache_data(show_spinner=False, ttl=60)
-def fetch_backend_traffic_records(api_url: str, api_token: str, bbox: str) -> pd.DataFrame:
-    if not api_url.strip():
-        return pd.DataFrame()
-
-    headers = {"User-Agent": "traffic-prediction-optimization/1.0"}
-    if api_token.strip():
-        headers["x-api-token"] = api_token.strip()
-
-    try:
-        response = requests.get(
-            f"{api_url.rstrip('/')}/traffic/incidents",
-            params={"bbox": bbox},
-            headers=headers,
-            timeout=20,
-        )
-        response.raise_for_status()
-        payload = response.json()
-    except Exception:
-        return pd.DataFrame()
-
-    incidents = payload.get("incidents", [])
-    rows = []
-    fetched_at = pd.to_datetime(payload.get("fetched_at"), errors="coerce")
-    for incident in incidents:
-        properties = incident.get("properties", {})
-        description = ""
-        for event in properties.get("events", []):
-            if event.get("description"):
-                description = str(event["description"])
-                break
-
-        rows.append(
-            {
-                "ds": fetched_at if pd.notna(fetched_at) else pd.Timestamp.utcnow(),
-                "y": float(properties.get("magnitudeOfDelay", 0) or 0),
-                "city": "Backend API",
-                "street": str(properties.get("from") or properties.get("to") or description or "Unbekannt"),
-            }
-        )
-
-    if not rows:
-        return pd.DataFrame()
-    return pd.DataFrame(rows)

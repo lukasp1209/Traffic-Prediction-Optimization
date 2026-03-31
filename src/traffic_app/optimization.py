@@ -1,7 +1,6 @@
 from __future__ import annotations
 
-import json
-from typing import Dict, List
+from typing import Dict
 
 import numpy as np
 import pandas as pd
@@ -76,9 +75,9 @@ def get_selected_measures() -> Dict[str, int]:
     scenario_name = st.selectbox("Scenario Preset", list(SCENARIOS.keys()), index=1)
     scenario = SCENARIOS[scenario_name]
 
-    st.caption(f"Ausgewaehltes Preset: {scenario.name}")
+    st.caption(f"Ausgewähltes Preset: {scenario.name}")
     signal = st.slider("Ampelsteuerung", 0, 100, scenario.signal, 5)
-    pt = st.slider("OePNV-Verstaerkung", 0, 100, scenario.public_transport, 5)
+    pt = st.slider("ÖPNV-Verstärkung", 0, 100, scenario.public_transport, 5)
     home = st.slider("Homeoffice-Anreiz", 0, 100, scenario.home_office, 5)
     construction = st.slider("Baustellen-Taktung", 0, 100, scenario.construction, 5)
     return {
@@ -87,28 +86,3 @@ def get_selected_measures() -> Dict[str, int]:
         "home_office": home,
         "construction": construction,
     }
-
-
-def run_api_mode(
-        forecast_df: pd.DataFrame,
-        optimized_df: pd.DataFrame,
-        kpis: Dict[str, float],
-        alerts_df: pd.DataFrame,
-        anomalies_df: pd.DataFrame,
-        selected_city: str,
-        selected_streets: List[str],
-        measures: Dict[str, int],
-        threshold: float,
-) -> str:
-    payload = {
-        "city": selected_city,
-        "streets": selected_streets,
-        "threshold": threshold,
-        "measures": measures,
-        "kpis": kpis,
-        "forecast": forecast_df.tail(24).to_dict(orient="records"),
-        "optimized_forecast": optimized_df.tail(24)[["ds", "base_forecast", "optimized_forecast", "effective_reduction"]].to_dict(orient="records"),
-        "alerts": alerts_df.to_dict(orient="records"),
-        "anomalies": anomalies_df.to_dict(orient="records"),
-    }
-    return json.dumps(payload, default=str)

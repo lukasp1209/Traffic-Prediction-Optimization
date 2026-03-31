@@ -1,4 +1,3 @@
-version: "3.9"
 services:
   traffic-app:
     build:
@@ -8,17 +7,24 @@ services:
     ports:
       - "8501:8501"
     restart: unless-stopped
-    depends_on:
-      - traffic-api
 
-  traffic-api:
+  jupyter:
     build:
       context: .
-      dockerfile: Dockerfile
-    container_name: traffic-prediction-api
-    command: ["uvicorn", "src.api:app", "--host", "0.0.0.0", "--port", "8000"]
-    env_file:
-      - .env
+      dockerfile: .docker/Dockerfile
+    container_name: traffic-prediction-jupyter
     ports:
-      - "8000:8000"
+      - "127.0.0.1:8888:8888"
+    volumes:
+      - .:/workspace
+    environment:
+      JUPYTER_ENABLE_LAB: "yes"
+    command: >
+      jupyter lab
+      --ip=0.0.0.0
+      --port=8888
+      --no-browser
+      --allow-root
+      --IdentityProvider.token=''
+      --IdentityProvider.password_required=False
     restart: unless-stopped

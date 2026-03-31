@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import matplotlib.dates as mdates
 import matplotlib.pyplot as plt
 import numpy as np
@@ -8,8 +9,14 @@ import pydeck as pdk
 import seaborn as sns
 import streamlit as st
 
-from .mapping import build_street_map_data, compute_map_view_state, select_map_time_window
-from .optimization import run_api_mode
+try:
+    import folium
+    from streamlit_folium import st_folium
+except ModuleNotFoundError:
+    folium = None
+    st_folium = None
+
+from .mapping import build_street_map_data, compute_map_view_state, get_city_view_defaults, select_map_time_window
 
 
 def configure_page() -> None:
@@ -62,19 +69,18 @@ def configure_page() -> None:
     )
 
 
-def render_app_header(selected_city: str, map_data_source: str, best_model_name: str, app_mode: str) -> None:
+def render_app_header(selected_city: str, map_data_source: str, best_model_name: str) -> None:
     st.markdown(
         f"""
         <div class="app-shell">
             <div class="app-eyebrow">Traffic Decision Intelligence</div>
             <div class="app-title">Stadtverkehr Leitstelle</div>
             <div class="app-subtitle">
-                Prognose, Kartenanalyse und Massnahmenplanung in einer gefuehrten Oberflaeche.
+                Prognose, Kartenanalyse und Maßnahmenplanung in einer geführten Oberfläche.
             </div>
             <span class="context-chip">Stadt: {selected_city}</span>
             <span class="context-chip">Quelle: {map_data_source}</span>
             <span class="context-chip">Bestes Modell: {best_model_name}</span>
-            <span class="context-chip">Modus: {app_mode}</span>
         </div>
         """,
         unsafe_allow_html=True,
@@ -96,8 +102,8 @@ def render_kpi_card(title: str, value: str) -> None:
 def format_forecast_view(df: pd.DataFrame, columns: list[str] | None = None) -> pd.DataFrame:
     rename_map = {
         "ds": "Zeitpunkt",
-        "base_forecast": "Prognose ohne Massnahmen (Verkehrsmenge)",
-        "optimized_forecast": "Prognose mit Massnahmen (Verkehrsmenge)",
+        "base_forecast": "Prognose ohne Maßnahmen (Verkehrsmenge)",
+        "optimized_forecast": "Prognose mit Maßnahmen (Verkehrsmenge)",
         "effective_reduction": "Wirksame Reduktion",
         "event_intensity": "Event-Einfluss",
         "is_event": "Event aktiv",
@@ -125,11 +131,11 @@ def format_model_metrics_view(metrics_df: pd.DataFrame) -> pd.DataFrame:
         "Algorithmus": "Modell",
         "MAE": "Durchschnittliche Abweichung",
         "RMSE": "Abweichung bei Ausreissern",
-        "R2": "Erklaerungsgrad",
+        "R2": "Erklärungsgrad",
     }
     display_df = metrics_df.rename(columns=rename_map).copy()
-    if "Erklaerungsgrad" in display_df.columns:
-        display_df["Erklaerungsgrad"] = (display_df["Erklaerungsgrad"] * 100).round(1).astype(str) + " %"
+    if "Erklärungsgrad" in display_df.columns:
+        display_df["Erklärungsgrad"] = (display_df["Erklärungsgrad"] * 100).round(1).astype(str) + " %"
     return display_df
 
 
@@ -170,6 +176,67 @@ def format_timestamp_value(value) -> str:
     return timestamp.strftime("%d.%m.%Y %H:%M")
 
 
+def build_folium_street_map(map_df: pd.DataFrame, selected_city: str, map_style: str):
+    tile_layers = {
+        "Standard": ("OpenStreetMap", {"name": "OpenStreetMap", "show": map_style == "Standard"}),
+        "Hell": ("CartoDB positron", {"name": "CartoDB Positron", "show": map_style == "Hell"}),
+        "Dunkel": ("CartoDB dark_matter", {"name": "CartoDB Dark", "show": map_style == "Dunkel"}),
+        "Satellit": (
+            "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+            {
+                "name": "Esri Satellite",
+                "attr": "Tiles © Esri",
+                "overlay": False,
+                "control": True,
+                "show": map_style == "Satellit",
+            },
+        ),
+    }
+
+    city_defaults = get_city_view_defaults(selected_city)
+    coords = np.array([coord for path in map_df["street_geometry"] for coord in path], dtype=float)
+    center_lon = float(coords[:, 0].mean()) if len(coords) else city_defaults["longitude"]
+    center_lat = float(coords[:, 1].mean()) if len(coords) else city_defaults["latitude"]
+    fmap = folium.Map(
+        location=[center_lat, center_lon],
+        zoom_start=city_defaults["zoom"],
+        tiles=None,
+        control_scale=True,
+    )
+
+    for tile, kwargs in tile_layers.values():
+        folium.TileLayer(tile, **kwargs).add_to(fmap)
+
+    for _, row in map_df.iterrows():
+        popup_html = (
+            f"<b>{row['street']}</b><br>"
+            f"Stadt: {selected_city}<br>"
+            f"Traffic-Level: {row['traffic_level']}<br>"
+            f"Durchschnitt: {row['avg_traffic']:.1f}<br>"
+            f"Peak: {row['peak_traffic']:.1f}<br>"
+            f"Messpunkte: {int(row['samples'])}"
+        )
+        if int(row["samples"]) <= 0:
+            popup_html += "<br><i>Keine direkte Messung aus der CSV zugeordnet</i>"
+
+        folium.PolyLine(
+            locations=[[point[1], point[0]] for point in row["street_geometry"]],
+            color=f"rgb({row['color'][0]},{row['color'][1]},{row['color'][2]})",
+            weight=max(float(row["width"]) / 2.5, 2.0),
+            opacity=0.85 if int(row["samples"]) > 0 else 0.45,
+            tooltip=row["street"],
+            popup=folium.Popup(popup_html, max_width=320),
+        ).add_to(fmap)
+
+    if len(coords):
+        sw = [float(coords[:, 1].min()), float(coords[:, 0].min())]
+        ne = [float(coords[:, 1].max()), float(coords[:, 0].max())]
+        fmap.fit_bounds([sw, ne], padding=(20, 20))
+
+    folium.LayerControl(collapsed=False).add_to(fmap)
+    return fmap
+
+
 def render_ops_tab(
         city_street_df: pd.DataFrame,
         map_traffic_df: pd.DataFrame,
@@ -177,6 +244,7 @@ def render_ops_tab(
         selected_streets: list[str],
         include_all_city_streets: bool,
         max_map_streets: int,
+        fast_map_mode: bool,
         map_data_source: str,
         reference,
         measures: dict[str, int],
@@ -192,20 +260,20 @@ def render_ops_tab(
     st.subheader("Operatives Dashboard")
 
     show_all_streets = include_all_city_streets or not selected_streets
-    street_count_label = "alle verfuegbaren/OSM-Strassen" if show_all_streets else str(len(selected_streets))
+    street_count_label = "alle verfügbaren/OSM-Straßen" if show_all_streets else str(len(selected_streets))
     context_col, action_col = st.columns([1.1, 0.9])
     with context_col:
         st.markdown("#### Lagebild")
         st.write(
             f"Stadt: **{selected_city}**  \n"
-            f"Strassen: **{street_count_label}**  \n"
+            f"Straßen: **{street_count_label}**  \n"
             f"Datenquelle: **{map_data_source}**"
         )
     with action_col:
-        st.markdown("#### Massnahmenmix")
+        st.markdown("#### Maßnahmenmix")
         st.write(
             f"Ampel: **{measures['signal']}**  \n"
-            f"OePNV: **{measures['public_transport']}**  \n"
+            f"ÖPNV: **{measures['public_transport']}**  \n"
             f"Homeoffice: **{measures['home_office']}**  \n"
             f"Baustellen: **{measures['construction']}**"
         )
@@ -215,7 +283,7 @@ def render_ops_tab(
             active_events = active_events[active_events["start"] >= pd.Timestamp.utcnow().tz_localize(None) - pd.Timedelta(days=1)]
             active_events = active_events.sort_values("start").head(3)
             if not active_events.empty:
-                st.caption("Naechste Events")
+                st.caption("Nächste Events")
                 for _, row in active_events.iterrows():
                     st.write(f"- {row['name']} ({pd.Timestamp(row['start']):%d.%m.%Y %H:%M})")
 
@@ -223,7 +291,7 @@ def render_ops_tab(
     with kpi1:
         render_kpi_card("Ausgangsprognose (Menge)", f"{kpis['baseline_total']:.0f}")
     with kpi2:
-        render_kpi_card("Mit Massnahmen (Menge)", f"{kpis['optimized_total']:.0f}")
+        render_kpi_card("Mit Maßnahmen (Menge)", f"{kpis['optimized_total']:.0f}")
     with kpi3:
         render_kpi_card("Reduktion", f"{kpis['reduction_pct']:.1f}%")
     with kpi4:
@@ -257,16 +325,16 @@ def render_ops_tab(
     with right_col:
         st.markdown("#### Prognosewirkung")
         fig, ax = plt.subplots(figsize=(14, 5))
-        ax.plot(optimized_df["ds"], optimized_df["base_forecast"], label="Prognose ohne Massnahmen", linewidth=2)
+        ax.plot(optimized_df["ds"], optimized_df["base_forecast"], label="Prognose ohne Maßnahmen", linewidth=2)
         ax.plot(
             optimized_df["ds"],
             optimized_df["optimized_forecast"],
-            label="Prognose mit Massnahmen",
+            label="Prognose mit Maßnahmen",
             linewidth=2,
             linestyle="--",
         )
         ax.axhline(threshold, color="red", linestyle=":", label="kritische Schwelle")
-        ax.set_title("Naechste Stunden: Prognose vs. Optimierung")
+        ax.set_title("Nächste Stunden: Prognose vs. Optimierung")
         ax.set_xlabel("Zeit")
         ax.set_ylabel("Verkehrsmenge je Zeitfenster")
         apply_time_axis_format(ax, optimized_df["ds"])
@@ -281,7 +349,11 @@ def render_ops_tab(
 
     st.markdown("#### Kartenansicht")
     map_start_ts, map_end_ts = select_map_time_window(available_timestamps)
-    st.caption(f"Ausgewaehlter Zeitraum: {map_start_ts:%d.%m.%Y %H:%M} bis {map_end_ts:%d.%m.%Y %H:%M}")
+    st.caption(f"Ausgewählter Zeitraum: {map_start_ts:%d.%m.%Y %H:%M} bis {map_end_ts:%d.%m.%Y %H:%M}")
+    if fast_map_mode:
+        st.caption("Im Schnellmodus werden nur präzise Geometrien angezeigt. Ungefähre Demo-Linien werden bewusst unterdrückt.")
+    style_options = ["Standard", "Hell", "Dunkel", "Satellit"] if folium is not None else ["Hell", "Dunkel"]
+    map_style = st.selectbox("Kartenstil", style_options, index=0)
 
     map_df = build_street_map_data(
         city_street_df=city_street_df,
@@ -292,6 +364,7 @@ def render_ops_tab(
         reference=reference,
         include_all_city_streets=include_all_city_streets,
         max_streets=max_map_streets,
+        fast_mode=fast_map_mode,
         traffic_df=map_traffic_df,
     )
 
@@ -300,72 +373,80 @@ def render_ops_tab(
         unmapped_streets = [street for street in selected_streets if street not in mapped_streets]
         if unmapped_streets:
             st.warning(
-                "Fuer folgende Strassen konnte keine passende OSM-Geometrie geladen werden: "
+                "Für folgende Straßen konnte keine passende OSM-Geometrie geladen werden: "
                 + ", ".join(unmapped_streets)
             )
     elif map_df.empty:
-        st.warning("Overpass konnte keine Strassengeometrien fuer die Stadt laden.")
+        st.warning("Overpass konnte keine Straßengeometrien für die Stadt laden.")
 
     if map_df.empty:
-        st.info("Keine Kartendaten im gewaehlten Zeitraum oder keine passenden OSM-Strassengeometrien.")
+        st.info("Keine präzisen Kartendaten im gewählten Zeitraum oder keine passenden OSM-Straßengeometrien.")
     else:
-        line_layer = pdk.Layer(
-            "PathLayer",
-            data=map_df,
-            get_path="street_geometry",
-            get_color="color",
-            get_width="width",
-            width_min_pixels=4,
-            pickable=True,
-            auto_highlight=True,
-            rounded=True,
-            cap_rounded=True,
-            joint_rounded=True,
-            opacity=0.78,
-        )
-        deck = pdk.Deck(
-            layers=[line_layer],
-            initial_view_state=compute_map_view_state(map_df, selected_city),
-            map_provider="carto",
-            map_style="light_no_labels",
-            tooltip={
-                "html": (
-                    "<b>{street}</b><br/>"
-                    "Auslastung: {traffic_level}<br/>"
-                    "Durchschnittliches Aufkommen: {avg_traffic}<br/>"
-                    "Spitzenwert: {peak_traffic}<br/>"
-                    "Messpunkte: {samples}"
-                )
-            },
-        )
-        st.pydeck_chart(deck, use_container_width=True, height=720)
-        st.caption(
-            "Farben: Gruen = niedrig, Gelb = mittel, Rot = hoch, Grau = keine Traffic-Messung | "
-            "Details erscheinen im Hover-Tooltip direkt auf der Strasse | "
-            f"Quelle: {map_data_source} | "
-            f"Zeitraum {pd.Timestamp(map_start_ts):%d.%m.%Y %H:%M} bis {pd.Timestamp(map_end_ts):%d.%m.%Y %H:%M}"
-        )
+        if folium is not None and st_folium is not None:
+            folium_map = build_folium_street_map(map_df, selected_city, map_style)
+            st_folium(folium_map, use_container_width=True, height=720, returned_objects=[])
+            st.caption(
+                "Farben: Grün = niedrig, Gelb = mittel, Rot = hoch, Grau = keine Traffic-Messung | "
+                "Straßen sind klickbar und zeigen Details im Popup | "
+                f"Quelle: {map_data_source} | "
+                f"Zeitraum {pd.Timestamp(map_start_ts):%d.%m.%Y %H:%M} bis {pd.Timestamp(map_end_ts):%d.%m.%Y %H:%M}"
+            )
+        else:
+            st.info("Für klickbare Karte und Satellitenansicht bitte einmal `pip install -r requirements.txt` ausführen.")
+            line_layer = pdk.Layer(
+                "PathLayer",
+                data=map_df,
+                get_path="street_geometry",
+                get_color="color",
+                get_width="width",
+                width_min_pixels=4,
+                pickable=True,
+                auto_highlight=True,
+                rounded=True,
+                cap_rounded=True,
+                joint_rounded=True,
+                opacity=0.78,
+            )
+            deck = pdk.Deck(
+                layers=[line_layer],
+                initial_view_state=compute_map_view_state(map_df, selected_city),
+                map_provider="carto",
+                map_style="light_no_labels" if map_style == "Hell" else "dark_no_labels",
+                tooltip={
+                    "html": (
+                        "<b>{street}</b><br/>"
+                        "Auslastung: {traffic_level}<br/>"
+                        "Durchschnittliches Aufkommen: {avg_traffic}<br/>"
+                        "Spitzenwert: {peak_traffic}<br/>"
+                        "Messpunkte: {samples}"
+                    )
+                },
+            )
+            st.pydeck_chart(deck, use_container_width=True, height=720)
 
-    recommendation = "Massnahmenplan ist ausreichend fuer den Zielwert."
+    recommendation = "Maßnahmenplan ist ausreichend für den Zielwert."
     if not kpis["achieved"]:
         recommendation = (
-            "Ziel noch nicht erreicht: Erhoehen Sie zuerst Ampelsteuerung und OePNV, "
-            "danach Homeoffice-Kampagnen fuer Spitzenzeiten."
+            "Ziel noch nicht erreicht: Erhöhen Sie zuerst Ampelsteuerung und ÖPNV, "
+            "danach Homeoffice-Kampagnen für Spitzenzeiten."
         )
     st.info(recommendation)
 
     st.download_button(
         "Optimierungsplan als JSON herunterladen",
-        data=run_api_mode(
-            forecast_df=forecast_df,
-            optimized_df=optimized_df,
-            kpis=kpis,
-            alerts_df=alerts_df,
-            anomalies_df=anomalies_df,
-            selected_city=selected_city,
-            selected_streets=selected_streets,
-            measures=measures,
-            threshold=threshold,
+        data=json.dumps(
+            {
+                "city": selected_city,
+                "streets": selected_streets,
+                "threshold": threshold,
+                "measures": measures,
+                "kpis": kpis,
+                "forecast": forecast_df.tail(24).to_dict(orient="records"),
+                "optimized_forecast": optimized_df.tail(24)[["ds", "base_forecast", "optimized_forecast", "effective_reduction"]].to_dict(orient="records"),
+                "alerts": alerts_df.to_dict(orient="records"),
+                "anomalies": anomalies_df.to_dict(orient="records"),
+            },
+            default=str,
         ).encode("utf-8"),
         file_name="traffic_optimization_plan.json",
         mime="application/json",
@@ -376,12 +457,12 @@ def render_model_tab(metrics_df: pd.DataFrame, predictions: dict[str, np.ndarray
     st.subheader("Modellvergleich")
     st.caption(
         "Die Tabelle zeigt, wie gut die Modelle das Verkehrsaufkommen treffen. "
-        "Kleinere Abweichungen sind besser, ein hoeherer Erklaerungsgrad ist besser."
+        "Kleinere Abweichungen sind besser, ein höherer Erklärungsgrad ist besser."
     )
     st.dataframe(format_model_metrics_view(metrics_df), use_container_width=True, hide_index=True)
     st.success(f"Bestes Modell bei starken Abweichungen: {best_model_name}")
 
-    selected_model = st.selectbox("Verlauf fuer Modell", list(predictions.keys()), index=0)
+    selected_model = st.selectbox("Verlauf für Modell", list(predictions.keys()), index=0)
     n_show = min(7 * 24, len(y_test))
     ts_show = ts_test.iloc[-n_show:]
     y_show = y_test.iloc[-n_show:]
@@ -414,7 +495,7 @@ def render_data_tab(
 
     st.markdown(f"**Stadt:** {selected_city}")
     st.markdown(
-        f"**Strassen in Auswahl:** {', '.join(selected_streets) if selected_streets else 'Alle darstellbaren Strassen der Stadt'}"
+        f"**Straßen in Auswahl:** {', '.join(selected_streets) if selected_streets else 'Alle darstellbaren Straßen der Stadt'}"
     )
     st.dataframe(format_forecast_view(model_df.tail(48)), use_container_width=True, hide_index=True)
 
