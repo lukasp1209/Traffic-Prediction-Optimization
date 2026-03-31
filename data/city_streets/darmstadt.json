@@ -1,0 +1,26 @@
+{
+  "city": "Darmstadt",
+  "city_multiplier": 1.0,
+  "streets": [
+    { "name": "Rheinstrasse", "weight": 0.10 },
+    { "name": "Frankfurter Strasse", "weight": 0.08 },
+    { "name": "Heidelberger Strasse", "weight": 0.08 },
+    { "name": "Nieder-Ramstaedter Strasse", "weight": 0.08 },
+    { "name": "Kasinostrasse", "weight": 0.06 },
+    { "name": "Bismarckstrasse", "weight": 0.06 },
+    { "name": "Pallaswiesenstrasse", "weight": 0.06 },
+    { "name": "Graefenhaeuser Strasse", "weight": 0.06 },
+    { "name": "Eschollbruecker Strasse", "weight": 0.06 },
+    { "name": "Landgraf-Georg-Strasse", "weight": 0.06 },
+    { "name": "Rossdoerfer Strasse", "weight": 0.05 },
+    { "name": "Berliner Allee", "weight": 0.05 },
+    { "name": "Holzhofallee", "weight": 0.04 },
+    { "name": "Heinrichstrasse", "weight": 0.04 },
+    { "name": "Ludwigshoehstrasse", "weight": 0.04 },
+    { "name": "Donnersbergring", "weight": 0.04 },
+    { "name": "Otto-Roehm-Strasse", "weight": 0.04 },
+    { "name": "Mornewegstrasse", "weight": 0.04 },
+    { "name": "Dolivostrasse", "weight": 0.03 },
+    { "name": "Soderstrasse", "weight": 0.03 }
+  ]
+}

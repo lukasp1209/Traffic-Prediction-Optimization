@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import re
+from difflib import SequenceMatcher
 import math
 from typing import Dict, List, Optional
 
@@ -11,10 +13,107 @@ import streamlit as st
 
 from .config import OVERPASS_API_URL
 from .domain import CityStreetReference
+from .streamlit_compat import cache_data
 from .text_utils import build_overpass_name_regex, canonicalize_text
 
 
-@st.cache_data(show_spinner=False, ttl=86_400)
+def normalize_street_key(value: str) -> str:
+    normalized = canonicalize_text(value)
+    normalized = normalized.replace("strasse", "str").replace("straße", "str")
+    normalized = normalized.replace("allee", "allee")
+    normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
+    return " ".join(normalized.split())
+
+
+def street_similarity(left: str, right: str) -> float:
+    left_norm = normalize_street_key(left)
+    right_norm = normalize_street_key(right)
+    if not left_norm or not right_norm:
+        return 0.0
+    if left_norm == right_norm:
+        return 1.0
+    left_tokens = set(left_norm.split())
+    right_tokens = set(right_norm.split())
+    token_score = len(left_tokens & right_tokens) / max(len(left_tokens | right_tokens), 1)
+    ratio_score = SequenceMatcher(None, left_norm, right_norm).ratio()
+    return max(token_score, ratio_score)
+
+
+def build_street_match_lookup(traffic_streets: List[str], osm_streets: List[str]) -> Dict[str, str]:
+    osm_by_norm: Dict[str, List[str]] = {}
+    for street in osm_streets:
+        osm_by_norm.setdefault(normalize_street_key(street), []).append(street)
+
+    matches: Dict[str, str] = {}
+    for traffic_street in traffic_streets:
+        traffic_norm = normalize_street_key(traffic_street)
+        exact_matches = osm_by_norm.get(traffic_norm, [])
+        if exact_matches:
+            matches[traffic_street] = exact_matches[0]
+            continue
+
+        best_match = ""
+        best_score = 0.0
+        for osm_street in osm_streets:
+            score = street_similarity(traffic_street, osm_street)
+            if score > best_score:
+                best_score = score
+                best_match = osm_street
+
+        if best_score >= 0.72:
+            matches[traffic_street] = best_match
+    return matches
+
+
+def merge_stats_into_geometry(
+    geometry_df: pd.DataFrame,
+    period_stats: pd.DataFrame,
+    street_reference: pd.DataFrame,
+) -> pd.DataFrame:
+    if geometry_df.empty:
+        return pd.DataFrame()
+
+    if period_stats.empty and street_reference.empty:
+        merged = geometry_df.copy()
+        merged["samples"] = 0
+        merged["avg_traffic"] = 0.0
+        merged["peak_traffic"] = 0.0
+        merged["street_ref_q75"] = np.nan
+        return merged
+
+    osm_streets = geometry_df["street"].astype(str).tolist()
+
+    stats_df = period_stats.copy() if not period_stats.empty else pd.DataFrame(columns=["street", "avg_traffic", "peak_traffic", "samples"])
+    ref_df = street_reference.copy() if not street_reference.empty else pd.DataFrame(columns=["street", "street_ref_q75"])
+
+    traffic_streets = sorted(set(stats_df.get("street", pd.Series(dtype=str)).astype(str).tolist()) | set(ref_df.get("street", pd.Series(dtype=str)).astype(str).tolist()))
+    match_lookup = build_street_match_lookup(traffic_streets, osm_streets)
+
+    if not stats_df.empty:
+        stats_df["matched_street"] = stats_df["street"].map(match_lookup)
+        stats_df = stats_df.dropna(subset=["matched_street"])
+        stats_df = (
+            stats_df.groupby("matched_street", as_index=False)
+            .agg(avg_traffic=("avg_traffic", "mean"), peak_traffic=("peak_traffic", "max"), samples=("samples", "sum"))
+        )
+    else:
+        stats_df = pd.DataFrame(columns=["matched_street", "avg_traffic", "peak_traffic", "samples"])
+
+    if not ref_df.empty:
+        ref_df["matched_street"] = ref_df["street"].map(match_lookup)
+        ref_df = ref_df.dropna(subset=["matched_street"])
+        ref_df = ref_df.groupby("matched_street", as_index=False)["street_ref_q75"].mean()
+    else:
+        ref_df = pd.DataFrame(columns=["matched_street", "street_ref_q75"])
+
+    return (
+        geometry_df.merge(stats_df, left_on="street", right_on="matched_street", how="left")
+        .merge(ref_df, left_on="street", right_on="matched_street", how="left", suffixes=("", "_ref"))
+        .drop(columns=[col for col in ["matched_street", "matched_street_ref"] if col in geometry_df.columns], errors="ignore")
+    )
+
+
+@cache_data(show_spinner=False, ttl=86_400)
 def fetch_street_geometry_overpass(city_name: str, street_name: str) -> Optional[List[List[float]]]:
     city_pattern = build_overpass_name_regex(city_name)
     street_pattern = build_overpass_name_regex(street_name)
@@ -54,7 +153,7 @@ out geom;
     return max(ways, key=len) if ways else None
 
 
-@st.cache_data(show_spinner=False, ttl=86_400)
+@cache_data(show_spinner=False, ttl=86_400)
 def fetch_all_city_streets_overpass(city_name: str) -> pd.DataFrame:
     city_pattern = build_overpass_name_regex(city_name)
     if not city_pattern:
@@ -217,7 +316,7 @@ def build_street_map_data(
     if max_streets > 0 and len(geometry_df) > max_streets:
         geometry_df = geometry_df.head(max_streets).copy()
 
-    map_df = geometry_df.merge(period_stats, on="street", how="left").merge(street_reference, on="street", how="left")
+    map_df = merge_stats_into_geometry(geometry_df, period_stats, street_reference)
     map_df["samples"] = map_df["samples"].fillna(0).astype(int)
     map_df["avg_traffic"] = map_df["avg_traffic"].fillna(0.0)
     map_df["peak_traffic"] = map_df["peak_traffic"].fillna(0.0)

@@ -4,7 +4,6 @@ from typing import Dict, List
 
 import numpy as np
 import pandas as pd
-import streamlit as st
 from sklearn.ensemble import GradientBoostingRegressor, RandomForestRegressor
 from sklearn.linear_model import LinearRegression, Ridge
 from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
@@ -12,9 +11,10 @@ from sklearn.preprocessing import StandardScaler
 
 from .config import NUMERIC_FEATURES
 from .events import get_event_feature_values
+from .streamlit_compat import cache_resource
 
 
-@st.cache_resource(show_spinner=False)
+@cache_resource(show_spinner=False)
 def train_models(df: pd.DataFrame, split_ratio: float):
     X = df[NUMERIC_FEATURES].values
     y = df["y"].values
@@ -32,8 +32,8 @@ def train_models(df: pd.DataFrame, split_ratio: float):
     models = {
         "Lineare Regression": LinearRegression(),
         "Ridge-Regression": Ridge(alpha=1.0),
-        "Random Forest": RandomForestRegressor(n_estimators=300, random_state=42),
-        "Gradient Boosting": GradientBoostingRegressor(n_estimators=300, random_state=42),
+        "Random Forest": RandomForestRegressor(n_estimators=120, random_state=42, n_jobs=-1),
+        "Gradient Boosting": GradientBoostingRegressor(n_estimators=120, random_state=42),
     }
 
     metrics: List[Dict[str, float | str]] = []
