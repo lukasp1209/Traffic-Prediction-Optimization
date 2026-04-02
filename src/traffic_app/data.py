@@ -396,6 +396,67 @@ def ensure_city_street_schema(df: pd.DataFrame, reference: CityStreetReference) 
     return data.dropna(subset=["city", "street"])
 
 
+def has_reference_street_overlap(df: pd.DataFrame, reference: CityStreetReference) -> bool:
+    if "city" not in df.columns or "street" not in df.columns:
+        return False
+
+    data = df.copy()
+    data["city"] = data["city"].astype(str).str.strip()
+    data["street"] = data["street"].astype(str).str.strip()
+
+    for city in sorted(data["city"].dropna().unique()):
+        reference_streets = reference.weights.get(city, {})
+        if not reference_streets:
+            continue
+
+        dataset_street_keys = {canonicalize_text(street) for street in data.loc[data["city"] == city, "street"].dropna().unique()}
+        reference_street_keys = {canonicalize_text(street) for street in reference_streets}
+        if dataset_street_keys & reference_street_keys:
+            return True
+
+    return False
+
+
+def project_city_totals_to_reference_streets(df: pd.DataFrame, reference: CityStreetReference) -> pd.DataFrame:
+    if "city" not in df.columns:
+        raise ValueError("Fuer die Projektion auf Demo-Strassen wird eine city-Spalte benoetigt.")
+
+    data = df.copy()
+    data["city"] = data["city"].astype(str).str.strip()
+    data["ds"] = pd.to_datetime(data["ds"], errors="coerce")
+    data["y"] = pd.to_numeric(data["y"], errors="coerce")
+    data = data.dropna(subset=["city", "ds", "y"])
+
+    projected_parts: list[pd.DataFrame] = []
+    for city in sorted(data["city"].unique()):
+        city_weights = reference.weights.get(city, {})
+        if not city_weights:
+            continue
+
+        total_weight = sum(max(float(weight), 0.0) for weight in city_weights.values())
+        if total_weight <= 0:
+            continue
+
+        city_totals = data.loc[data["city"] == city].groupby("ds", as_index=False)["y"].sum()
+        if city_totals.empty:
+            continue
+
+        for street, weight in city_weights.items():
+            street_weight = max(float(weight), 0.0) / total_weight
+            street_df = city_totals.copy()
+            street_df["city"] = city
+            street_df["street"] = street
+            street_df["y"] = street_df["y"] * street_weight
+            projected_parts.append(street_df)
+
+    if not projected_parts:
+        return data
+
+    projected_df = pd.concat(projected_parts, ignore_index=True)
+    projected_df["y"] = projected_df["y"].clip(lower=0)
+    return projected_df.sort_values(["city", "street", "ds"]).reset_index(drop=True)
+
+
 def aggregate_city_series(df: pd.DataFrame, selected_city: str, selected_streets: List[str]) -> pd.DataFrame:
     filtered = df[(df["city"] == selected_city) & (df["street"].isin(selected_streets))].copy()
     if filtered.empty:

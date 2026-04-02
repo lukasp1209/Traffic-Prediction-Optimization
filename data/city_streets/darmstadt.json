@@ -3,7 +3,7 @@
   "city_multiplier": 1.0,
   "streets": [
     {
-      "name": "Rheinstra?e",
+      "name": "Rheinstraße",
       "weight": 0.1,
       "geometry": [
         [
@@ -21,7 +21,7 @@
       ]
     },
     {
-      "name": "Frankfurter Stra?e",
+      "name": "Frankfurter Straße",
       "weight": 0.08,
       "geometry": [
         [
@@ -39,7 +39,7 @@
       ]
     },
     {
-      "name": "Heidelberger Stra?e",
+      "name": "Heidelberger Straße",
       "weight": 0.08,
       "geometry": [
         [
@@ -57,7 +57,7 @@
       ]
     },
     {
-      "name": "Nieder-Ramst?dter Stra?e",
+      "name": "Nieder-Ramstädter Straße",
       "weight": 0.08,
       "geometry": [
         [
@@ -75,7 +75,7 @@
       ]
     },
     {
-      "name": "Kasinostra?e",
+      "name": "Kasinostraße",
       "weight": 0.06,
       "geometry": [
         [
@@ -93,7 +93,7 @@
       ]
     },
     {
-      "name": "Bismarckstra?e",
+      "name": "Bismarckstraße",
       "weight": 0.06,
       "geometry": [
         [
@@ -111,7 +111,7 @@
       ]
     },
     {
-      "name": "Pallaswiesenstra?e",
+      "name": "Pallaswiesenstraße",
       "weight": 0.06,
       "geometry": [
         [
@@ -129,7 +129,7 @@
       ]
     },
     {
-      "name": "Gr?fenh?user Stra?e",
+      "name": "Gräfenhäuser Straße",
       "weight": 0.06,
       "geometry": [
         [
@@ -147,7 +147,7 @@
       ]
     },
     {
-      "name": "Eschollbr?cker Stra?e",
+      "name": "Eschollbrücker Straße",
       "weight": 0.06,
       "geometry": [
         [
@@ -165,7 +165,7 @@
       ]
     },
     {
-      "name": "Landgraf-Georg-Stra?e",
+      "name": "Landgraf-Georg-Straße",
       "weight": 0.06,
       "geometry": [
         [
@@ -183,7 +183,7 @@
       ]
     },
     {
-      "name": "Ro?d?rfer Stra?e",
+      "name": "Roßdörfer Straße",
       "weight": 0.05,
       "geometry": [
         [
@@ -237,7 +237,7 @@
       ]
     },
     {
-      "name": "Heinrichstra?e",
+      "name": "Heinrichstraße",
       "weight": 0.04,
       "geometry": [
         [
@@ -255,7 +255,7 @@
       ]
     },
     {
-      "name": "Ludwigsh?hstra?e",
+      "name": "Ludwigshöhstraße",
       "weight": 0.04,
       "geometry": [
         [
@@ -291,7 +291,7 @@
       ]
     },
     {
-      "name": "Otto-R?hm-Stra?e",
+      "name": "Otto-Röhm-Straße",
       "weight": 0.04,
       "geometry": [
         [
@@ -309,7 +309,7 @@
       ]
     },
     {
-      "name": "Mornewegstra?e",
+      "name": "Mornewegstraße",
       "weight": 0.04,
       "geometry": [
         [
@@ -327,7 +327,7 @@
       ]
     },
     {
-      "name": "Dolivostra?e",
+      "name": "Dolivostraße",
       "weight": 0.03,
       "geometry": [
         [
@@ -345,7 +345,7 @@
       ]
     },
     {
-      "name": "Soderstra?e",
+      "name": "Soderstraße",
       "weight": 0.03,
       "geometry": [
         [

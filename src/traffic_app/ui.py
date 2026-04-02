@@ -194,14 +194,25 @@ def build_folium_street_map(map_df: pd.DataFrame, selected_city: str, map_style:
     }
 
     city_defaults = get_city_view_defaults(selected_city)
-    coords = np.array([coord for path in map_df["street_geometry"] for coord in path], dtype=float)
-    center_lon = float(coords[:, 0].mean()) if len(coords) else city_defaults["longitude"]
-    center_lat = float(coords[:, 1].mean()) if len(coords) else city_defaults["latitude"]
+
+    coords = np.array(
+        [coord for path in map_df["street_geometry"] for coord in path],
+        dtype=float
+    )
+
+    if len(coords):
+        center_lon = float(coords[:, 0].mean())
+        center_lat = float(coords[:, 1].mean())
+    else:
+        center_lat = city_defaults["latitude"]
+        center_lon = city_defaults["longitude"]
+
     fmap = folium.Map(
         location=[center_lat, center_lon],
         zoom_start=city_defaults["zoom"],
         tiles=None,
         control_scale=True,
+        max_zoom=16,
     )
 
     for tile, kwargs in tile_layers.values():
@@ -216,6 +227,7 @@ def build_folium_street_map(map_df: pd.DataFrame, selected_city: str, map_style:
             f"Peak: {row['peak_traffic']:.1f}<br>"
             f"Messpunkte: {int(row['samples'])}"
         )
+
         if int(row["samples"]) <= 0:
             popup_html += "<br><i>Keine direkte Messung aus der CSV zugeordnet</i>"
 
@@ -228,14 +240,8 @@ def build_folium_street_map(map_df: pd.DataFrame, selected_city: str, map_style:
             popup=folium.Popup(popup_html, max_width=320),
         ).add_to(fmap)
 
-    if len(coords):
-        sw = [float(coords[:, 1].min()), float(coords[:, 0].min())]
-        ne = [float(coords[:, 1].max()), float(coords[:, 0].max())]
-        fmap.fit_bounds([sw, ne], padding=(20, 20))
-
     folium.LayerControl(collapsed=False).add_to(fmap)
     return fmap
-
 
 def render_ops_tab(
         city_street_df: pd.DataFrame,
@@ -244,7 +250,6 @@ def render_ops_tab(
         selected_streets: list[str],
         include_all_city_streets: bool,
         max_map_streets: int,
-        fast_map_mode: bool,
         map_data_source: str,
         reference,
         measures: dict[str, int],
@@ -350,11 +355,6 @@ def render_ops_tab(
     st.markdown("#### Kartenansicht")
     map_start_ts, map_end_ts = select_map_time_window(available_timestamps)
     st.caption(f"Ausgewählter Zeitraum: {map_start_ts:%d.%m.%Y %H:%M} bis {map_end_ts:%d.%m.%Y %H:%M}")
-    if fast_map_mode:
-        st.caption("Im Schnellmodus werden nur präzise Geometrien angezeigt. Ungefähre Demo-Linien werden bewusst unterdrückt.")
-    style_options = ["Standard", "Hell", "Dunkel", "Satellit"] if folium is not None else ["Hell", "Dunkel"]
-    map_style = st.selectbox("Kartenstil", style_options, index=0)
-
     map_df = build_street_map_data(
         city_street_df=city_street_df,
         selected_city=selected_city,
@@ -364,7 +364,6 @@ def render_ops_tab(
         reference=reference,
         include_all_city_streets=include_all_city_streets,
         max_streets=max_map_streets,
-        fast_mode=fast_map_mode,
         traffic_df=map_traffic_df,
     )
 
@@ -377,13 +376,13 @@ def render_ops_tab(
                 + ", ".join(unmapped_streets)
             )
     elif map_df.empty:
-        st.warning("Overpass konnte keine Straßengeometrien für die Stadt laden.")
+        st.warning("Overpass konnte keine OSM-Straßengeometrien für die Stadt laden. Demo-Linien werden nicht als Ersatz verwendet.")
 
     if map_df.empty:
-        st.info("Keine präzisen Kartendaten im gewählten Zeitraum oder keine passenden OSM-Straßengeometrien.")
+        st.info("Keine exakten OSM-Kartendaten im gewählten Zeitraum oder keine passenden OSM-Straßengeometrien.")
     else:
         if folium is not None and st_folium is not None:
-            folium_map = build_folium_street_map(map_df, selected_city, map_style)
+            folium_map = build_folium_street_map(map_df, selected_city, "Standard")
             st_folium(folium_map, use_container_width=True, height=720, returned_objects=[])
             st.caption(
                 "Farben: Grün = niedrig, Gelb = mittel, Rot = hoch, Grau = keine Traffic-Messung | "
@@ -411,7 +410,7 @@ def render_ops_tab(
                 layers=[line_layer],
                 initial_view_state=compute_map_view_state(map_df, selected_city),
                 map_provider="carto",
-                map_style="light_no_labels" if map_style == "Hell" else "dark_no_labels",
+                map_style="light_no_labels",
                 tooltip={
                     "html": (
                         "<b>{street}</b><br/>"

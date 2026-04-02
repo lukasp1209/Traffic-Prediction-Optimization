@@ -9,8 +9,10 @@ from .config import CITY_CONFIG_DIR, DEFAULT_DATA, EVENT_CONFIG_DIR
 from .data import (
     engineer_features,
     ensure_city_street_schema,
+    has_reference_street_overlap,
     load_city_street_reference,
     normalize_input,
+    project_city_totals_to_reference_streets,
     read_csv_bytes,
     read_csv_file,
     read_open_traffic_zip_bytes,
@@ -73,10 +75,17 @@ def prepare_city_street_data(
         and "city" not in normalized_df.columns
         and "street" not in normalized_df.columns
     )
+    uses_sensor_like_test_data = (
+        source == "Darmstadt Testdatensatz"
+        and {"city", "street"}.issubset(set(normalized_df.columns))
+        and not has_reference_street_overlap(normalized_df, reference)
+    )
     if source != "Darmstadt Testdatensatz" and not {"city", "street"}.issubset(set(normalized_df.columns)):
         raise ValueError("Neue Städte müssen per CSV mit den Spalten city, street, ds und y geliefert werden.")
     if uses_demo_city_streets:
         return ensure_city_street_schema(normalized_df, reference)
+    if uses_sensor_like_test_data:
+        return project_city_totals_to_reference_streets(normalized_df, reference)
     return normalized_df.copy()
 
 
@@ -199,11 +208,8 @@ def run_app() -> None:
                 "Auslastungsdaten",
                 ("Primärdatensatz", "Historische CSV"),
             )
-            fast_map_mode = st.checkbox("Schnellmodus für Karte", value=True)
-            include_all_city_streets = st.checkbox("Alle OSM-Straßen der Stadt anzeigen", value=False)
+            include_all_city_streets = st.checkbox("Alle OSM-Straßen der Stadt anzeigen", value=True)
             max_map_streets = st.slider("Max. Straßen auf Karte", min_value=500, max_value=10000, value=3000, step=500)
-            if fast_map_mode:
-                st.caption("Schnellmodus vermeidet große Overpass-Abfragen und bevorzugt lokale oder bereits gecachte Geometrien.")
 
             map_uploaded_csv = None
 
@@ -246,7 +252,6 @@ def run_app() -> None:
                     selected_city=selected_city,
                     selected_streets=selected_streets,
                     map_data_source=map_data_source,
-                    fast_map_mode=fast_map_mode,
                     include_all_city_streets=include_all_city_streets,
                     max_map_streets=max_map_streets,
                     map_uploaded_payload=serialize_upload(map_uploaded_csv),
@@ -264,7 +269,6 @@ def run_app() -> None:
             selected_city=selected_city,
             selected_streets=selected_streets,
             map_data_source=map_data_source,
-            fast_map_mode=fast_map_mode,
             include_all_city_streets=include_all_city_streets,
             max_map_streets=max_map_streets,
             map_uploaded_payload=serialize_upload(map_uploaded_csv),
@@ -288,6 +292,11 @@ def run_app() -> None:
             st.info(
                 "Hinweis: Die aktuelle Datei enthält keine city/street-Spalten. "
                 "Die App verwendet deshalb ein Demo-Straßennetz aus JSON-Dateien unter data/city_streets."
+            )
+        elif applied["source"] == "Darmstadt Testdatensatz" and not has_reference_street_overlap(read_csv_file(str(DEFAULT_DATA)), reference):
+            st.info(
+                "Hinweis: Der Testdatensatz enthält Messanlagen statt OSM-Straßennamen. "
+                "Für die Kartenansicht werden die Lasten daher auf das lokale Demo-Straßennetz projiziert."
             )
 
         selected_city_df = build_selected_city_series(city_street_df, applied["selected_city"])
@@ -350,7 +359,6 @@ def run_app() -> None:
               selected_streets=applied["selected_streets"],
               include_all_city_streets=applied["include_all_city_streets"],
               max_map_streets=applied["max_map_streets"],
-              fast_map_mode=applied["fast_map_mode"],
               map_data_source=applied["map_data_source"],
             reference=reference,
             measures=applied["measures"],

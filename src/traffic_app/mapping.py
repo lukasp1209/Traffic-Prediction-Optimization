@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import math
 import re
 from difflib import SequenceMatcher
-import math
 from typing import Dict, List, Optional
 
 import numpy as np
@@ -11,7 +11,7 @@ import pydeck as pdk
 import requests
 import streamlit as st
 
-from .config import OVERPASS_API_URL
+from .config import OVERPASS_API_URLS
 from .domain import CityStreetReference
 from .streamlit_compat import cache_data
 from .text_utils import build_overpass_name_regex, canonicalize_text
@@ -29,9 +29,27 @@ def get_city_view_defaults(selected_city: str) -> dict[str, float]:
 def normalize_street_key(value: str) -> str:
     normalized = canonicalize_text(value)
     normalized = normalized.replace("strasse", "str").replace("straße", "str")
-    normalized = normalized.replace("allee", "allee")
     normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
     return " ".join(normalized.split())
+
+
+def _run_overpass_query(query: str, timeout: int) -> dict:
+    headers = {"User-Agent": "traffic-prediction-optimization/1.0"}
+    for api_url in OVERPASS_API_URLS:
+        try:
+            response = requests.post(
+                api_url,
+                data={"data": query},
+                timeout=timeout,
+                headers=headers,
+            )
+            response.raise_for_status()
+            payload = response.json()
+            if isinstance(payload, dict):
+                return payload
+        except Exception:
+            continue
+    return {}
 
 
 def street_similarity(left: str, right: str) -> float:
@@ -91,19 +109,22 @@ def merge_stats_into_geometry(
         return merged
 
     osm_streets = geometry_df["street"].astype(str).tolist()
-
     stats_df = period_stats.copy() if not period_stats.empty else pd.DataFrame(columns=["street", "avg_traffic", "peak_traffic", "samples"])
     ref_df = street_reference.copy() if not street_reference.empty else pd.DataFrame(columns=["street", "street_ref_q75"])
 
-    traffic_streets = sorted(set(stats_df.get("street", pd.Series(dtype=str)).astype(str).tolist()) | set(ref_df.get("street", pd.Series(dtype=str)).astype(str).tolist()))
+    traffic_streets = sorted(
+        set(stats_df.get("street", pd.Series(dtype=str)).astype(str).tolist())
+        | set(ref_df.get("street", pd.Series(dtype=str)).astype(str).tolist())
+    )
     match_lookup = build_street_match_lookup(traffic_streets, osm_streets)
 
     if not stats_df.empty:
         stats_df["matched_street"] = stats_df["street"].map(match_lookup)
         stats_df = stats_df.dropna(subset=["matched_street"])
-        stats_df = (
-            stats_df.groupby("matched_street", as_index=False)
-            .agg(avg_traffic=("avg_traffic", "mean"), peak_traffic=("peak_traffic", "max"), samples=("samples", "sum"))
+        stats_df = stats_df.groupby("matched_street", as_index=False).agg(
+            avg_traffic=("avg_traffic", "mean"),
+            peak_traffic=("peak_traffic", "max"),
+            samples=("samples", "sum"),
         )
     else:
         stats_df = pd.DataFrame(columns=["matched_street", "avg_traffic", "peak_traffic", "samples"])
@@ -118,7 +139,7 @@ def merge_stats_into_geometry(
     return (
         geometry_df.merge(stats_df, left_on="street", right_on="matched_street", how="left")
         .merge(ref_df, left_on="street", right_on="matched_street", how="left", suffixes=("", "_ref"))
-        .drop(columns=[col for col in ["matched_street", "matched_street_ref"] if col in geometry_df.columns], errors="ignore")
+        .drop(columns=["matched_street", "matched_street_ref"], errors="ignore")
     )
 
 
@@ -131,21 +152,18 @@ def fetch_street_geometry_overpass(city_name: str, street_name: str) -> Optional
 
     query = f"""
 [out:json][timeout:30];
-area["boundary"="administrative"]["name"~"^({city_pattern})$",i]->.searchArea;
+area["ISO3166-1"="DE"][admin_level=2]->.country;
+(
+  relation["boundary"="administrative"]["name"~"^({city_pattern})$",i](area.country);
+  relation["admin_level"]["name"~"^({city_pattern})$",i](area.country);
+);
+map_to_area->.searchArea;
 way["highway"]["name"~"^({street_pattern})$",i](area.searchArea);
 out geom;
 """
 
-    try:
-        response = requests.post(
-            OVERPASS_API_URL,
-            data={"data": query},
-            timeout=35,
-            headers={"User-Agent": "traffic-prediction-optimization/1.0"},
-        )
-        response.raise_for_status()
-        payload = response.json()
-    except Exception:
+    payload = _run_overpass_query(query, timeout=35)
+    if not payload:
         return None
 
     ways = []
@@ -170,21 +188,18 @@ def fetch_all_city_streets_overpass(city_name: str) -> pd.DataFrame:
 
     query = f"""
 [out:json][timeout:60];
-area["boundary"="administrative"]["name"~"^({city_pattern})$",i]->.searchArea;
+area["ISO3166-1"="DE"][admin_level=2]->.country;
+(
+  relation["boundary"="administrative"]["name"~"^({city_pattern})$",i](area.country);
+  relation["admin_level"]["name"~"^({city_pattern})$",i](area.country);
+);
+map_to_area->.searchArea;
 way["highway"]["name"](area.searchArea);
 out geom;
 """
 
-    try:
-        response = requests.post(
-            OVERPASS_API_URL,
-            data={"data": query},
-            timeout=65,
-            headers={"User-Agent": "traffic-prediction-optimization/1.0"},
-        )
-        response.raise_for_status()
-        payload = response.json()
-    except Exception:
+    payload = _run_overpass_query(query, timeout=65)
+    if not payload:
         return pd.DataFrame(columns=["street", "street_geometry"])
 
     rows: List[Dict[str, object]] = []
@@ -217,17 +232,14 @@ out geom;
 
 
 def get_street_geometry(city_name: str, street_name: str, reference: CityStreetReference) -> Optional[List[List[float]]]:
-    overpass_geometry = fetch_street_geometry_overpass(city_name, street_name)
-    if overpass_geometry is not None:
-        return overpass_geometry
-    return None
+    return fetch_street_geometry_overpass(city_name, street_name)
 
 
 def resolve_selected_street_geometries(
-        selected_city: str,
-        selected_streets: List[str],
-        reference: CityStreetReference,
-        allow_overpass_fallback: bool = True,
+    selected_city: str,
+    selected_streets: List[str],
+    reference: CityStreetReference,
+    allow_overpass_fallback: bool = True,
 ) -> pd.DataFrame:
     geometry_rows = []
     for street in selected_streets:
@@ -240,7 +252,6 @@ def resolve_selected_street_geometries(
     if not allow_overpass_fallback:
         return pd.DataFrame(columns=["street", "street_geometry"])
 
-    # Fallback: if direct lookups fail, use the broader city-level Overpass result once.
     geometry_df = fetch_all_city_streets_overpass(selected_city)
     if geometry_df.empty:
         return pd.DataFrame(columns=["street", "street_geometry"])
@@ -262,16 +273,15 @@ def resolve_selected_street_geometries(
 
 
 def build_street_map_data(
-        city_street_df: pd.DataFrame,
-        selected_city: str,
-        selected_streets: List[str],
-        start_ts: pd.Timestamp,
-        end_ts: pd.Timestamp,
-        reference: CityStreetReference,
-        include_all_city_streets: bool = False,
-        max_streets: int = 500,
-        fast_mode: bool = True,
-        traffic_df: Optional[pd.DataFrame] = None,
+    city_street_df: pd.DataFrame,
+    selected_city: str,
+    selected_streets: List[str],
+    start_ts: pd.Timestamp,
+    end_ts: pd.Timestamp,
+    reference: CityStreetReference,
+    include_all_city_streets: bool = True,
+    max_streets: int = 500,
+    traffic_df: Optional[pd.DataFrame] = None,
 ) -> pd.DataFrame:
     source_df = traffic_df.copy() if traffic_df is not None else city_street_df.copy()
     if source_df.empty:
@@ -296,9 +306,10 @@ def build_street_map_data(
     if period_filtered.empty:
         period_stats = pd.DataFrame(columns=["street", "avg_traffic", "peak_traffic", "samples"])
     else:
-        period_stats = (
-            period_filtered.groupby("street", as_index=False)
-            .agg(avg_traffic=("y", "mean"), peak_traffic=("y", "max"), samples=("y", "size"))
+        period_stats = period_filtered.groupby("street", as_index=False).agg(
+            avg_traffic=("y", "mean"),
+            peak_traffic=("y", "max"),
+            samples=("y", "size"),
         )
 
     if city_filtered.empty:
@@ -311,16 +322,13 @@ def build_street_map_data(
         )
 
     if show_all_streets:
-        if fast_mode:
-            geometry_df = pd.DataFrame(columns=["street", "street_geometry"])
-        else:
-            geometry_df = fetch_all_city_streets_overpass(selected_city)
+        geometry_df = fetch_all_city_streets_overpass(selected_city)
     else:
         geometry_df = resolve_selected_street_geometries(
             selected_city,
             selected_streets,
             reference,
-            allow_overpass_fallback=not fast_mode,
+            allow_overpass_fallback=True,
         )
 
     if geometry_df.empty:
